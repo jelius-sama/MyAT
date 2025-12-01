@@ -295,7 +295,13 @@ public final class HTTPServer {
      * new thread for each incoming connection.
      */
     public func start() {
-        let listenFD = socket(AF_INET, Int32(SOCK_STREAM), 0)
+        #if canImport(Glibc)
+            let sockType = Int32(SOCK_STREAM.rawValue)
+        #else
+            let sockType = Int32(SOCK_STREAM)
+        #endif
+
+        let listenFD = socket(AF_INET, sockType, 0)
         if listenFD < 0 {
             perror("socket")
             return
@@ -374,13 +380,24 @@ public final class HTTPServer {
                 Unmanaged.passRetained(context)
             let rawPtr = unmanaged.toOpaque()
 
-            var thread: pthread_t? = nil
-            let result = pthread_create(
-                &thread,
-                nil,
-                clientThreadEntry,
-                rawPtr
-            )
+            #if canImport(Glibc)
+                var thread: pthread_t = 0
+                let result = pthread_create(
+                    &thread,
+                    nil,
+                    clientThreadEntry,
+                    rawPtr
+                )
+            #else
+                var thread: pthread_t? = nil
+                let result = pthread_create(
+                    &thread,
+                    nil,
+                    clientThreadEntry,
+                    rawPtr
+                )
+            #endif
+
             if result != 0 {
                 print("Failed to create thread: \(result)")
                 unmanaged.release()
@@ -389,8 +406,14 @@ public final class HTTPServer {
                 /*
                  * We do not need to join on this thread; detach so that
                  * resources are cleaned when it exits.
-                 */
-                pthread_detach(thread)
+                */
+                #if canImport(Glibc)
+                    pthread_detach(thread)
+                #else
+                    if let t = thread {
+                        pthread_detach(t)
+                    }
+                #endif
             }
         }
     }
