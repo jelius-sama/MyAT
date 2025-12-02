@@ -147,7 +147,3 @@ func Head(request: HTTPRequest) -> HTTPResponse {
         headers: customHeaders
     )
 }
-
-func y(request: HTTPRequest) -> HTTPResponse {
-
-}
