@@ -10,11 +10,6 @@ func InitRouter() -> Router {
     }
 
     /*
-     * Global middleware: Add a custom server header to all responses.
-     * Note: This would need response middleware support, so we skip for now.
-     */
-
-    /*
      * API logging middleware - logs detailed info for API routes.
      */
     let apiLogger: Middleware = { request in
@@ -22,6 +17,9 @@ func InitRouter() -> Router {
         print("  Method: \(request.method)")
         print("  Path: \(request.path)")
         print("  Headers: \(request.headers)")
+        if !request.pathParameters.isEmpty {
+            print("  Path Parameters: \(request.pathParameters)")
+        }
         return Optional<HTTPResponse>.none
     }
 
@@ -44,7 +42,26 @@ func InitRouter() -> Router {
     }
 
     /*
-     * Basic routes with plain text responses.
+     * Custom 404 handler.
+     */
+    router.setNotFoundHandler { request in
+        let jsonBody = """
+            {
+                "error": "Not Found",
+                "message": "The requested resource [\(request.method)] \(request.path) was not found.",
+                "status": 404
+            }
+            """
+
+        return HTTPResponse.json(
+            statusCode: 404,
+            reason: "Not Found",
+            body: jsonBody
+        )
+    }
+
+    /*
+     * Basic static routes with plain text responses.
      */
     router.register(method: "GET", path: "/") { _ in
         HTTPResponse.text(
@@ -175,6 +192,136 @@ func InitRouter() -> Router {
             headers: customHeaders
         )
     }
+
+    /*
+     * Dynamic route: Get user by ID.
+     */
+    router.register(
+        method: "GET",
+        path: "/users/:id",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { request in
+        guard let userId = request.pathParameters["id"] else {
+            return HTTPResponse.json(
+                statusCode: 400,
+                reason: "Bad Request",
+                body: "{\"error\": \"Missing user ID\"}"
+            )
+        }
+
+        let jsonBody = """
+            {
+                "id": "\(userId)",
+                "name": "User \(userId)",
+                "email": "user\(userId)@example.com"
+            }
+            """
+
+        return HTTPResponse.json(
+            statusCode: 200,
+            reason: "OK",
+            body: jsonBody
+        )
+    }
+
+    /*
+     * Dynamic route: Get specific comment on a post.
+     */
+    router.register(
+        method: "GET",
+        path: "/posts/:postId/comments/:commentId",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { request in
+        guard let postId = request.pathParameters["postId"],
+            let commentId = request.pathParameters["commentId"]
+        else {
+            return HTTPResponse.json(
+                statusCode: 400,
+                reason: "Bad Request",
+                body: "{\"error\": \"Missing parameters\"}"
+            )
+        }
+
+        let jsonBody = """
+            {
+                "postId": "\(postId)",
+                "commentId": "\(commentId)",
+                "author": "Anonymous",
+                "text": "This is comment \(commentId) on post \(postId)"
+            }
+            """
+
+        return HTTPResponse.json(
+            statusCode: 200,
+            reason: "OK",
+            body: jsonBody
+        )
+    }
+
+    /*
+     * Static route that might conflict with dynamic route.
+     * This will take precedence over /users/:id when path is exactly "/users/me"
+     */
+    router.register(
+        method: "GET",
+        path: "/users/me",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { request in
+        let jsonBody = """
+            {
+                "id": "current",
+                "name": "Current User",
+                "email": "me@example.com",
+                "note": "This is the static /users/me route"
+            }
+            """
+
+        return HTTPResponse.json(
+            statusCode: 200,
+            reason: "OK",
+            body: jsonBody
+        )
+    }
+
+    /*
+     * Dynamic route: Product categories and products.
+     */
+    router.register(
+        method: "GET",
+        path: "/products/:category/:productId"
+    ) { request in
+        guard let category = request.pathParameters["category"],
+            let productId = request.pathParameters["productId"]
+        else {
+            return HTTPResponse.json(
+                statusCode: 400,
+                reason: "Bad Request",
+                body: "{\"error\": \"Missing parameters\"}"
+            )
+        }
+
+        let jsonBody = """
+            {
+                "category": "\(category)",
+                "productId": "\(productId)",
+                "name": "Product \(productId)",
+                "price": 99.99
+            }
+            """
+
+        return HTTPResponse.json(
+            statusCode: 200,
+            reason: "OK",
+            body: jsonBody
+        )
+    }
+
+    /*
+     * This will cause a fatal error if uncommented because it's a duplicate:
+     * router.register(method: "GET", path: "/users/:id") { _ in
+     *     HTTPResponse.text(body: "Duplicate!")
+     * }
+     */
 
     return router
 }

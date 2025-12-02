@@ -10,6 +10,11 @@
 public typealias HTTPHeaders = Dictionary<String, String>
 
 /*
+ * Type alias for path parameters extracted from dynamic routes.
+ */
+public typealias PathParameters = Dictionary<String, String>
+
+/*
  * Basic HTTP request representation.
  */
 public struct HTTPRequest {
@@ -18,6 +23,23 @@ public struct HTTPRequest {
     public let version: String
     public let headers: HTTPHeaders
     public let body: Array<UInt8>
+    public var pathParameters: PathParameters
+
+    public init(
+        method: String,
+        path: String,
+        version: String,
+        headers: HTTPHeaders,
+        body: Array<UInt8>,
+        pathParameters: PathParameters = PathParameters()
+    ) {
+        self.method = method
+        self.path = path
+        self.version = version
+        self.headers = headers
+        self.body = body
+        self.pathParameters = pathParameters
+    }
 }
 
 /*
@@ -158,11 +180,29 @@ public typealias HTTPHandler = (HTTPRequest) -> HTTPResponse
 public typealias Middleware = (HTTPRequest) -> Optional<HTTPResponse>
 
 /*
- * Route entry that holds handler and optional middleware.
+ * Route pattern types: static or dynamic with parameters.
  */
-fileprivate struct RouteEntry {
+internal enum RoutePattern {
+    case staticRoute(path: String)
+    case dynamicRoute(segments: Array<RouteSegment>)
+}
+
+/*
+ * Route segment for dynamic routing.
+ */
+internal enum RouteSegment {
+    case literal(String)
+    case parameter(String)
+}
+
+/*
+ * Route entry that holds handler, middleware, and pattern info.
+ */
+internal struct RouteEntry {
+    let pattern: RoutePattern
     let handler: HTTPHandler
     let middleware: Array<Middleware>
+    let originalPath: String
 }
 
 /*
@@ -179,13 +219,16 @@ final class ClientContext {
 }
 
 /*
- * Simple router: method + path -> handler with middleware support.
+ * Router with support for static and dynamic routes, middleware,
+ * and custom 404 handlers.
  */
 public final class Router {
-    private var routes: Dictionary<String, Dictionary<String, RouteEntry>> =
-        Dictionary<String, Dictionary<String, RouteEntry>>()
+    private var routes: Dictionary<String, Array<RouteEntry>> =
+        Dictionary<String, Array<RouteEntry>>()
 
     private var globalMiddleware: Array<Middleware> = Array<Middleware>()
+
+    private var notFoundHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
 
     public init() {}
 
@@ -197,7 +240,19 @@ public final class Router {
     }
 
     /*
+     * Set a custom 404 handler.
+     */
+    public func setNotFoundHandler(handler: @escaping HTTPHandler) {
+        notFoundHandler = Optional<HTTPHandler>.some(handler)
+    }
+
+    /*
      * Register a handler for a given method and path with optional middleware.
+     * Supports dynamic routes with :parameter syntax.
+     * Examples:
+     *   - Static: "/users"
+     *   - Dynamic: "/users/:id"
+     *   - Dynamic: "/posts/:postId/comments/:commentId"
      */
     public func register(
         method: String,
@@ -205,10 +260,51 @@ public final class Router {
         middleware: Array<Middleware> = Array<Middleware>(),
         handler: @escaping HTTPHandler
     ) {
-        var methodRoutes =
-            routes[method] ?? Dictionary<String, RouteEntry>()
-        let entry = RouteEntry(handler: handler, middleware: middleware)
-        methodRoutes[path] = entry
+        let pattern = parseRoutePath(path: path)
+        let entry = RouteEntry(
+            pattern: pattern,
+            handler: handler,
+            middleware: middleware,
+            originalPath: path
+        )
+
+        /*
+         * Get existing routes for this method.
+         */
+        var methodRoutes = routes[method] ?? Array<RouteEntry>()
+
+        /*
+         * Check for exact duplicates (same method + same path).
+         */
+        for existing in methodRoutes {
+            if existing.originalPath == path {
+                fatalError(
+                    "Route collision detected: [\(method)] \(path) " + "is already registered."
+                )
+            }
+        }
+
+        /*
+         * Check for static vs dynamic conflicts.
+         */
+        if case .staticRoute(let staticPath) = pattern {
+            for existing in methodRoutes {
+                if case .dynamicRoute = existing.pattern {
+                    if matchesPattern(
+                        path: staticPath,
+                        pattern: existing.pattern
+                    ) != nil {
+                        print(
+                            "⚠️  Warning: Static route [\(method)] \(path) "
+                                + "shadows dynamic route \(existing.originalPath). "
+                                + "Static route will take precedence."
+                        )
+                    }
+                }
+            }
+        }
+
+        methodRoutes.append(entry)
         routes[method] = methodRoutes
     }
 
@@ -230,23 +326,64 @@ public final class Router {
         }
 
         /*
-         * Find the route entry.
+         * Find matching route entry.
          */
-        guard let methodRoutes = routes[request.method],
-            let entry = methodRoutes[request.path]
-        else {
-            return HTTPResponse.text(
-                statusCode: 404,
-                reason: "Not Found",
-                body: "404 Not Found"
-            )
+        guard let methodRoutes = routes[request.method] else {
+            return handleNotFound(request: request)
         }
+
+        /*
+         * Try static routes first, then dynamic routes.
+         */
+        var staticMatch: Optional<RouteEntry> = Optional<RouteEntry>.none
+        var dynamicMatch: Optional<(RouteEntry, PathParameters)> =
+            Optional<(RouteEntry, PathParameters)>.none
+
+        for entry in methodRoutes {
+            switch entry.pattern {
+            case .staticRoute(let staticPath):
+                if staticPath == request.path {
+                    staticMatch = Optional<RouteEntry>.some(entry)
+                    break
+                }
+            case .dynamicRoute:
+                if let params = matchesPattern(
+                    path: request.path,
+                    pattern: entry.pattern
+                ) {
+                    dynamicMatch = Optional<(RouteEntry, PathParameters)>.some(
+                        (entry, params)
+                    )
+                }
+            }
+        }
+
+        /*
+         * Static routes take precedence over dynamic routes.
+         */
+        let matchedEntry: RouteEntry
+        var pathParams = PathParameters()
+
+        if let staticEntry = staticMatch {
+            matchedEntry = staticEntry
+        } else if let (dynamicEntry, params) = dynamicMatch {
+            matchedEntry = dynamicEntry
+            pathParams = params
+        } else {
+            return handleNotFound(request: request)
+        }
+
+        /*
+         * Create request with path parameters.
+         */
+        var requestWithParams = request
+        requestWithParams.pathParameters = pathParams
 
         /*
          * Execute route-specific middleware.
          */
-        for mw in entry.middleware {
-            if let response = mw(request) {
+        for mw in matchedEntry.middleware {
+            if let response = mw(requestWithParams) {
                 return response
             }
         }
@@ -254,7 +391,92 @@ public final class Router {
         /*
          * Execute the handler.
          */
-        return entry.handler(request)
+        return matchedEntry.handler(requestWithParams)
+    }
+
+    /*
+     * Handle 404 with custom handler or default.
+     */
+    private func handleNotFound(request: HTTPRequest) -> HTTPResponse {
+        if let handler = notFoundHandler {
+            return handler(request)
+        }
+
+        return HTTPResponse.text(
+            statusCode: 404,
+            reason: "Not Found",
+            body: "404 Not Found"
+        )
+    }
+
+    /*
+     * Parse route path into pattern (static or dynamic).
+     */
+    private func parseRoutePath(path: String) -> RoutePattern {
+        let components = path.split(separator: "/")
+        var segments = Array<RouteSegment>()
+        var isDynamic = false
+
+        for component in components {
+            let part = String(component)
+            if part.hasPrefix(":") {
+                let paramName = String(part.dropFirst())
+                segments.append(RouteSegment.parameter(paramName))
+                isDynamic = true
+            } else {
+                segments.append(RouteSegment.literal(part))
+            }
+        }
+
+        if isDynamic {
+            return RoutePattern.dynamicRoute(segments: segments)
+        } else {
+            return RoutePattern.staticRoute(path: path)
+        }
+    }
+
+    /*
+     * Match a request path against a route pattern.
+     * Returns path parameters if matched, none otherwise.
+     */
+    private func matchesPattern(
+        path: String,
+        pattern: RoutePattern
+    ) -> Optional<PathParameters> {
+        switch pattern {
+        case .staticRoute(let staticPath):
+            return path == staticPath
+                ? Optional<PathParameters>.some(PathParameters())
+                : Optional<PathParameters>.none
+
+        case .dynamicRoute(let segments):
+            let pathComponents = path.split(separator: "/")
+
+            if pathComponents.count != segments.count {
+                return Optional<PathParameters>.none
+            }
+
+            var params = PathParameters()
+
+            var index = 0
+            while index < segments.count {
+                let segment = segments[index]
+                let component = String(pathComponents[index])
+
+                switch segment {
+                case .literal(let expected):
+                    if component != expected {
+                        return Optional<PathParameters>.none
+                    }
+                case .parameter(let name):
+                    params[name] = component
+                }
+
+                index += 1
+            }
+
+            return Optional<PathParameters>.some(params)
+        }
     }
 }
 
@@ -265,6 +487,7 @@ public final class HTTPServer {
     private let port: UInt16
     private let router: Router
     private let assetManager: Optional<AssetManager>
+    private let parser: HTTPParser
 
     public init(
         port: UInt16,
@@ -274,6 +497,7 @@ public final class HTTPServer {
         self.port = port
         self.router = router
         self.assetManager = assetManager
+        self.parser = HTTPParser()
     }
 
     /*
@@ -430,7 +654,7 @@ public final class HTTPServer {
             temp.removeSubrange(bytesRead..<tempSize)
             buffer.append(contentsOf: temp)
 
-            if let range = findHeaderEnd(in: buffer) {
+            if let range = parser.findHeaderEnd(in: buffer) {
                 headerParsed = true
                 let headerEndIndex = range.upperBound
                 headerBytes = Array(buffer[..<headerEndIndex])
@@ -446,7 +670,7 @@ public final class HTTPServer {
             return
         }
 
-        let request = parseRequest(from: requestString)
+        let request = parser.parseRequest(from: requestString)
 
         /*
          * Example: simple static file handler prefix.
@@ -485,91 +709,6 @@ public final class HTTPServer {
         }
 
         close(fd)
-    }
-
-    /*
-     * Find the index of "\r\n\r\n" in the buffer.
-     */
-    private func findHeaderEnd(
-        in buffer: Array<UInt8>
-    ) -> Optional<Range<Int>> {
-        if buffer.count < 4 {
-            return Optional<Range<Int>>.none
-        }
-
-        let pattern = Array<UInt8>(Array("\r\n\r\n".utf8))
-        let maxIndex = buffer.count - pattern.count
-
-        var i = 0
-        while i <= maxIndex {
-            var matched = true
-            var j = 0
-            while j < pattern.count {
-                if buffer[i + j] != pattern[j] {
-                    matched = false
-                    break
-                }
-                j += 1
-            }
-            if matched {
-                let range = i..<(i + pattern.count)
-                return Optional<Range<Int>>.some(range)
-            }
-            i += 1
-        }
-
-        return Optional<Range<Int>>.none
-    }
-
-    /*
-     * Very small HTTP/1.1 parser: request line + headers.
-     * Body is ignored for now, which is fine for GET and simple use.
-     */
-    private func parseRequest(from raw: String) -> HTTPRequest {
-        let lines = raw.split(separator: "\r\n", omittingEmptySubsequences: false)
-        var method = "GET"
-        var path = "/"
-        var version = "HTTP/1.1"
-
-        if lines.count > 0 {
-            let requestLineParts = lines[0].split(separator: " ")
-            if requestLineParts.count >= 3 {
-                method = String(requestLineParts[0])
-                path = String(requestLineParts[1])
-                version = String(requestLineParts[2])
-            }
-        }
-
-        var headers = HTTPHeaders()
-        if lines.count > 1 {
-            var index = 1
-            while index < lines.count {
-                let line = lines[index]
-                index += 1
-                if line.isEmpty {
-                    break
-                }
-
-                if let separatorIndex = line.firstIndex(of: ":") {
-                    let name = String(line[..<separatorIndex])
-                        .trimmingCharacters(in: .whitespaces)
-                    let valueStart =
-                        line.index(after: separatorIndex)
-                    let value = String(line[valueStart...])
-                        .trimmingCharacters(in: .whitespaces)
-                    headers[name] = value
-                }
-            }
-        }
-
-        let body = Array<UInt8>()
-        return HTTPRequest(
-            method: method,
-            path: path,
-            version: version,
-            headers: headers,
-            body: body
-        )
     }
 }
 
