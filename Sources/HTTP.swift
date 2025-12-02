@@ -5,13 +5,18 @@
 #endif
 
 /*
+ * Type alias for HTTP headers dictionary.
+ */
+public typealias HTTPHeaders = Dictionary<String, String>
+
+/*
  * Basic HTTP request representation.
  */
 public struct HTTPRequest {
     public let method: String
     public let path: String
     public let version: String
-    public let headers: Dictionary<String, String>
+    public let headers: HTTPHeaders
     public let body: Array<UInt8>
 }
 
@@ -21,8 +26,23 @@ public struct HTTPRequest {
 public struct HTTPResponse {
     public let statusCode: Int
     public let reasonPhrase: String
-    public var headers: Dictionary<String, String>
+    public var headers: HTTPHeaders
     public var body: Array<UInt8>
+
+    /*
+     * Main initializer with all parameters.
+     */
+    public init(
+        statusCode: Int,
+        reasonPhrase: String,
+        headers: HTTPHeaders,
+        body: Array<UInt8>
+    ) {
+        self.statusCode = statusCode
+        self.reasonPhrase = reasonPhrase
+        self.headers = headers
+        self.body = body
+    }
 
     /*
      * Serialize response to HTTP/1.1 wire format.
@@ -48,17 +68,58 @@ public struct HTTPResponse {
      * Build a plain text response quickly.
      */
     public static func text(
-        statusCode: Int,
-        reason: String,
-        body: String
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
     ) -> HTTPResponse {
         let bytes = Array(body.utf8)
-        var headers = Dictionary<String, String>()
-        headers["Content-Type"] = "text/plain; charset=utf-8"
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "text/plain; charset=utf-8"
         return HTTPResponse(
             statusCode: statusCode,
             reasonPhrase: reason,
-            headers: headers,
+            headers: responseHeaders,
+            body: bytes
+        )
+    }
+
+    /*
+     * Build an HTML response.
+     */
+    public static func html(
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
+    ) -> HTTPResponse {
+        let bytes = Array(body.utf8)
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "text/html; charset=utf-8"
+        return HTTPResponse(
+            statusCode: statusCode,
+            reasonPhrase: reason,
+            headers: responseHeaders,
+            body: bytes
+        )
+    }
+
+    /*
+     * Build a JSON response.
+     */
+    public static func json(
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
+    ) -> HTTPResponse {
+        let bytes = Array(body.utf8)
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "application/json; charset=utf-8"
+        return HTTPResponse(
+            statusCode: statusCode,
+            reasonPhrase: reason,
+            headers: responseHeaders,
             body: bytes
         )
     }
@@ -69,14 +130,15 @@ public struct HTTPResponse {
     public static func fromAsset(
         asset: Asset,
         statusCode: Int = 200,
-        reason: String = "OK"
+        reason: String = "OK",
+        headers: HTTPHeaders = HTTPHeaders()
     ) -> HTTPResponse {
-        var headers = Dictionary<String, String>()
-        headers["Content-Type"] = asset.mimeType
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = asset.mimeType
         return HTTPResponse(
             statusCode: statusCode,
             reasonPhrase: reason,
-            headers: headers,
+            headers: responseHeaders,
             body: asset.data
         )
     }
@@ -86,6 +148,22 @@ public struct HTTPResponse {
  * HTTP handler type used by the router.
  */
 public typealias HTTPHandler = (HTTPRequest) -> HTTPResponse
+
+/*
+ * Middleware type that can intercept and modify requests/responses.
+ * Returns Optional<HTTPResponse>:
+ * - .some(response): Short-circuit with this response
+ * - .none: Continue to next middleware/handler
+ */
+public typealias Middleware = (HTTPRequest) -> Optional<HTTPResponse>
+
+/*
+ * Route entry that holds handler and optional middleware.
+ */
+fileprivate struct RouteEntry {
+    let handler: HTTPHandler
+    let middleware: Array<Middleware>
+}
 
 /*
  * Context passed into a client handler thread.
@@ -101,43 +179,82 @@ final class ClientContext {
 }
 
 /*
- * Simple router: method + path -> handler.
+ * Simple router: method + path -> handler with middleware support.
  */
 public final class Router {
-    private var routes: Dictionary<String, Dictionary<String, HTTPHandler>> =
-        Dictionary<String, Dictionary<String, HTTPHandler>>()
+    private var routes: Dictionary<String, Dictionary<String, RouteEntry>> =
+        Dictionary<String, Dictionary<String, RouteEntry>>()
+
+    private var globalMiddleware: Array<Middleware> = Array<Middleware>()
 
     public init() {}
 
     /*
-     * Register a handler for a given method and path.
+     * Register global middleware that runs for all routes.
+     */
+    public func use(middleware: @escaping Middleware) {
+        globalMiddleware.append(middleware)
+    }
+
+    /*
+     * Register a handler for a given method and path with optional middleware.
      */
     public func register(
         method: String,
         path: String,
+        middleware: Array<Middleware> = Array<Middleware>(),
         handler: @escaping HTTPHandler
     ) {
         var methodRoutes =
-            routes[method] ?? Dictionary<String, HTTPHandler>()
-        methodRoutes[path] = handler
+            routes[method] ?? Dictionary<String, RouteEntry>()
+        let entry = RouteEntry(handler: handler, middleware: middleware)
+        methodRoutes[path] = entry
         routes[method] = methodRoutes
     }
 
     /*
-     * Route a request. If no handler is found, return 404.
+     * Route a request through middleware chain and handler.
+     * Execution order:
+     * 1. Global middleware (can short-circuit)
+     * 2. Route-specific middleware (can short-circuit)
+     * 3. Handler
      */
     public func route(request: HTTPRequest) -> HTTPResponse {
-        if let methodRoutes = routes[request.method],
-            let handler = methodRoutes[request.path]
-        {
-            return handler(request)
+        /*
+         * Execute global middleware first.
+         */
+        for mw in globalMiddleware {
+            if let response = mw(request) {
+                return response
+            }
         }
 
-        return HTTPResponse.text(
-            statusCode: 404,
-            reason: "Not Found",
-            body: "404 Not Found"
-        )
+        /*
+         * Find the route entry.
+         */
+        guard let methodRoutes = routes[request.method],
+            let entry = methodRoutes[request.path]
+        else {
+            return HTTPResponse.text(
+                statusCode: 404,
+                reason: "Not Found",
+                body: "404 Not Found"
+            )
+        }
+
+        /*
+         * Execute route-specific middleware.
+         */
+        for mw in entry.middleware {
+            if let response = mw(request) {
+                return response
+            }
+        }
+
+        /*
+         * Execute the handler.
+         */
+        return entry.handler(request)
     }
 }
 
@@ -423,7 +540,7 @@ public final class HTTPServer {
             }
         }
 
-        var headers = Dictionary<String, String>()
+        var headers = HTTPHeaders()
         if lines.count > 1 {
             var index = 1
             while index < lines.count {
