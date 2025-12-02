@@ -206,6 +206,85 @@ internal struct RouteEntry {
 }
 
 /*
+ * Not found handler configuration with builder pattern.
+ */
+public final class NotFoundHandlerBuilder {
+    private var assetHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+    private var apiHandlers: Array<(String, HTTPHandler)> = Array<(String, HTTPHandler)>()
+    private var defaultHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+
+    internal init() {}
+
+    /*
+     * Set handler for asset 404 errors (e.g., /static/).
+     */
+    public func forAssets(
+        prefix: String,
+        handler: @escaping HTTPHandler
+    ) -> NotFoundHandlerBuilder {
+        assetHandler = Optional<HTTPHandler>.some(handler)
+        return self
+    }
+
+    /*
+     * Set handler for API 404 errors with a specific prefix.
+     */
+    public func forAPI(
+        prefix: String,
+        handler: @escaping HTTPHandler
+    ) -> NotFoundHandlerBuilder {
+        apiHandlers.append((prefix, handler))
+        return self
+    }
+
+    /*
+     * Set the default 404 handler.
+     */
+    public func `default`(handler: @escaping HTTPHandler) -> NotFoundHandlerBuilder {
+        defaultHandler = Optional<HTTPHandler>.some(handler)
+        return self
+    }
+
+    /*
+     * Build the final handler that checks all conditions.
+     */
+    internal func build() -> HTTPHandler {
+        return { request in
+            /*
+             * Check asset handler first.
+             */
+            if let assetH = self.assetHandler,
+                request.path.hasPrefix("/static/")
+            {
+                return assetH(request)
+            }
+
+            /*
+             * Check API handlers.
+             */
+            for (prefix, handler) in self.apiHandlers {
+                if request.path.hasPrefix(prefix) {
+                    return handler(request)
+                }
+            }
+
+            /*
+             * Default handler or fallback.
+             */
+            if let defaultH = self.defaultHandler {
+                return defaultH(request)
+            }
+
+            return HTTPResponse.text(
+                statusCode: 404,
+                reason: "Not Found",
+                body: "404 Not Found"
+            )
+        }
+    }
+}
+
+/*
  * Context passed into a client handler thread.
  */
 final class ClientContext {
@@ -240,10 +319,18 @@ public final class Router {
     }
 
     /*
-     * Set a custom 404 handler.
+     * Set a custom 404 handler with builder pattern.
      */
-    public func setNotFoundHandler(handler: @escaping HTTPHandler) {
-        notFoundHandler = Optional<HTTPHandler>.some(handler)
+    public func setNotFoundHandler() -> NotFoundHandlerBuilder {
+        let builder = NotFoundHandlerBuilder()
+        return builder
+    }
+
+    /*
+     * Finalize the 404 handler from builder.
+     */
+    public func finalize404Handler(builder: NotFoundHandlerBuilder) {
+        notFoundHandler = Optional<HTTPHandler>.some(builder.build())
     }
 
     /*
@@ -279,7 +366,8 @@ public final class Router {
         for existing in methodRoutes {
             if existing.originalPath == path {
                 fatalError(
-                    "Route collision detected: [\(method)] \(path) " + "is already registered."
+                    "Route collision detected: [\(method)] \(path) "
+                        + "is already registered."
                 )
             }
         }
@@ -397,7 +485,7 @@ public final class Router {
     /*
      * Handle 404 with custom handler or default.
      */
-    private func handleNotFound(request: HTTPRequest) -> HTTPResponse {
+    internal func handleNotFound(request: HTTPRequest) -> HTTPResponse {
         if let handler = notFoundHandler {
             return handler(request)
         }
@@ -630,7 +718,7 @@ public final class HTTPServer {
 
     /*
      * Parse HTTP request from client, route it, and send response.
-     * Handles a single request then closes the connection.
+     * Handles request body parsing based on Content-Length.
      */
     fileprivate func handleClient(fd: Int32) {
         var buffer = Array<UInt8>()
@@ -658,7 +746,16 @@ public final class HTTPServer {
                 headerParsed = true
                 let headerEndIndex = range.upperBound
                 headerBytes = Array(buffer[..<headerEndIndex])
-                /* For now we ignore any body; this is fine for GET. */
+
+                /*
+                 * Keep any bytes after the header end for body parsing.
+                 */
+                if headerEndIndex < buffer.count {
+                    let bodyStart = buffer[headerEndIndex...]
+                    buffer = Array(bodyStart)
+                } else {
+                    buffer = Array<UInt8>()
+                }
             }
         }
 
@@ -670,12 +767,56 @@ public final class HTTPServer {
             return
         }
 
-        let request = parser.parseRequest(from: requestString)
+        var request = parser.parseRequest(from: requestString)
 
         /*
-         * Example: simple static file handler prefix.
-         * If the path starts with "/static/" and an asset manager
-         * is provided, we let it serve the file.
+         * Parse request body if Content-Length is present.
+         */
+        if let contentLengthStr = request.headers["Content-Length"],
+            let contentLength = Int(contentLengthStr),
+            contentLength > 0
+        {
+            var bodyBytes = buffer
+            let remainingBytes = contentLength - bodyBytes.count
+
+            /*
+             * Read remaining body bytes if needed.
+             */
+            if remainingBytes > 0 {
+                var remaining = remainingBytes
+                while remaining > 0 {
+                    var temp = Array<UInt8>(repeating: 0, count: min(tempSize, remaining))
+                    let len = temp.count
+                    let bytesRead = temp.withUnsafeMutableBytes { rawBuf -> Int in
+                        let ptr = rawBuf.baseAddress!
+                        return Int(read(fd, ptr, len))
+                    }
+
+                    if bytesRead <= 0 {
+                        break
+                    }
+
+                    temp.removeSubrange(bytesRead..<temp.count)
+                    bodyBytes.append(contentsOf: temp)
+                    remaining -= bytesRead
+                }
+            }
+
+            /*
+             * Update request with parsed body.
+             */
+            request = HTTPRequest(
+                method: request.method,
+                path: request.path,
+                version: request.version,
+                headers: request.headers,
+                body: bodyBytes,
+                pathParameters: request.pathParameters
+            )
+        }
+
+        /*
+         * Handle static file serving with custom 404.
          */
         let response: HTTPResponse
 
@@ -683,7 +824,6 @@ public final class HTTPServer {
             request.method == "GET",
             request.path.hasPrefix("/static/")
         {
-
             let index = request.path.index(
                 request.path.startIndex,
                 offsetBy: "/static/".count
@@ -692,11 +832,10 @@ public final class HTTPServer {
             if let asset = assets.loadAsset(relativePath: rel) {
                 response = HTTPResponse.fromAsset(asset: asset)
             } else {
-                response = HTTPResponse.text(
-                    statusCode: 404,
-                    reason: "Not Found",
-                    body: "Asset not found"
-                )
+                /*
+                 * Use router's 404 handler for assets.
+                 */
+                response = router.handleNotFound(request: request)
             }
         } else {
             response = router.route(request: request)

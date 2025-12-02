@@ -1,3 +1,5 @@
+import Foundation
+
 func InitRouter() -> Router {
     let router = Router()
 
@@ -19,6 +21,9 @@ func InitRouter() -> Router {
         print("  Headers: \(request.headers)")
         if !request.pathParameters.isEmpty {
             print("  Path Parameters: \(request.pathParameters)")
+        }
+        if !request.body.isEmpty {
+            print("  Body Size: \(request.body.count) bytes")
         }
         return Optional<HTTPResponse>.none
     }
@@ -42,156 +47,101 @@ func InitRouter() -> Router {
     }
 
     /*
-     * Custom 404 handler.
+     * Custom 404 handler with builder pattern.
      */
-    router.setNotFoundHandler { request in
-        let jsonBody = """
-            {
-                "error": "Not Found",
-                "message": "The requested resource [\(request.method)] \(request.path) was not found.",
-                "status": 404
-            }
-            """
+    let notFoundBuilder = router.setNotFoundHandler()
+        .forAssets(prefix: "/static/") { request in
+            let htmlContent = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Asset Not Found</title>
+                    <style>
+                        body { font-family: sans-serif; text-align: center; padding: 50px; }
+                        h1 { color: #e74c3c; }
+                    </style>
+                </head>
+                <body>
+                    <h1>404 - Asset Not Found</h1>
+                    <p>The requested asset <code>\(request.path)</code> could not be found.</p>
+                </body>
+                </html>
+                """
+            return HTTPResponse.html(
+                statusCode: 404,
+                reason: "Not Found",
+                body: htmlContent
+            )
+        }
+        .forAPI(prefix: "/api/") { request in
+            let jsonBody = """
+                {
+                    "error": "Not Found",
+                    "message": "The API endpoint [\(request.method)] \(request.path) does not exist.",
+                    "status": 404,
+                    "timestamp": "\(Date())"
+                }
+                """
+            return HTTPResponse.json(
+                statusCode: 404,
+                reason: "Not Found",
+                body: jsonBody
+            )
+        }
+        .default { request in
+            let htmlContent = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Page Not Found</title>
+                    <style>
+                        body { font-family: sans-serif; text-align: center; padding: 50px; }
+                        h1 { color: #2c3e50; }
+                        a { color: #3498db; text-decoration: none; }
+                    </style>
+                </head>
+                <body>
+                    <h1>404 - Page Not Found</h1>
+                    <p>The page you're looking for doesn't exist.</p>
+                    <a href="/">Go back home</a>
+                </body>
+                </html>
+                """
+            return HTTPResponse.html(
+                statusCode: 404,
+                reason: "Not Found",
+                body: htmlContent
+            )
+        }
 
-        return HTTPResponse.json(
-            statusCode: 404,
-            reason: "Not Found",
-            body: jsonBody
-        )
-    }
+    router.finalize404Handler(builder: notFoundBuilder)
 
     /*
      * Basic static routes with plain text responses.
      */
-    router.register(method: "GET", path: "/") { _ in
-        HTTPResponse.text(
-            statusCode: 200,
-            reason: "OK",
-            body: "Hello from raw TCP Swift HTTP server.\n"
-        )
-    }
+    router.register(method: "GET", path: "/") { req in return Home(request: req) }
 
-    router.register(method: "GET", path: "/hello") { _ in
-        HTTPResponse.text(
-            statusCode: 200,
-            reason: "OK",
-            body: "Hello, World!\n"
-        )
-    }
+    router.register(method: "GET", path: "/hello") { req in return Hello(request: req) }
 
-    router.register(method: "GET", path: "/coding") { _ in
-        HTTPResponse.text(
-            statusCode: 200,
-            reason: "OK",
-            body: "ABSOLUTE CODING!!!\n"
-        )
-    }
+    router.register(method: "GET", path: "/coding") { req in return Coding(request: req) }
 
-    router.register(method: "GET", path: "/kazu") { _ in
-        var customHeaders = HTTPHeaders()
-        customHeaders["X-Custom-Header"] = "Kazu-specific"
-        customHeaders["X-Greeting"] = "Hello!"
+    router.register(method: "GET", path: "/kazu") { req in return Kazu(request: req) }
 
-        return HTTPResponse.text(
-            statusCode: 200,
-            reason: "OK",
-            body: "Hello Kazu-kun!\n",
-            headers: customHeaders
-        )
-    }
+    router.register(method: "GET", path: "/html") { req in return HTML(request: req) }
 
-    /*
-     * HTML response example.
-     */
-    router.register(method: "GET", path: "/html") { _ in
-        let htmlContent = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>MyAT Server</title>
-            </head>
-            <body>
-                <h1>Welcome to MyAT!</h1>
-                <p>This is an HTML response from our Swift HTTP server.</p>
-            </body>
-            </html>
-            """
-
-        return HTTPResponse.html(
-            statusCode: 200,
-            reason: "OK",
-            body: htmlContent
-        )
-    }
-
-    /*
-     * JSON response example with API logging middleware.
-     */
     router.register(
         method: "GET",
         path: "/api/status",
         middleware: Array<Middleware>(arrayLiteral: apiLogger)
-    ) { _ in
-        let jsonBody = """
-            {
-                "status": "ok",
-                "version": "1.0.0",
-                "server": "MyAT"
-            }
-            """
+    ) { req in JsonBody(request: req) }
 
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
-
-    /*
-     * Protected API endpoint with auth middleware.
-     */
     router.register(
         method: "GET",
         path: "/api/protected",
         middleware: Array<Middleware>(arrayLiteral: apiLogger, requireAuth)
-    ) { request in
-        let jsonBody = """
-            {
-                "message": "You have access to protected data!",
-                "user": "authenticated"
-            }
-            """
+    ) { req in return Protected(request: req) }
 
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
-
-    /*
-     * Example with custom response headers.
-     */
-    router.register(method: "GET", path: "/api/data") { _ in
-        var customHeaders = HTTPHeaders()
-        customHeaders["X-API-Version"] = "1.0"
-        customHeaders["X-Rate-Limit"] = "100"
-        customHeaders["Cache-Control"] = "no-cache"
-
-        let jsonBody = """
-            {
-                "data": [1, 2, 3, 4, 5],
-                "count": 5
-            }
-            """
-
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody,
-            headers: customHeaders
-        )
-    }
+    router.register(method: "GET", path: "/api/data") { req in return Data(request: req) }
 
     /*
      * Dynamic route: Get user by ID.
@@ -200,29 +150,56 @@ func InitRouter() -> Router {
         method: "GET",
         path: "/users/:id",
         middleware: Array<Middleware>(arrayLiteral: apiLogger)
-    ) { request in
-        guard let userId = request.pathParameters["id"] else {
-            return HTTPResponse.json(
-                statusCode: 400,
-                reason: "Bad Request",
-                body: "{\"error\": \"Missing user ID\"}"
-            )
-        }
+    ) { req in return User(request: req) }
 
-        let jsonBody = """
-            {
-                "id": "\(userId)",
-                "name": "User \(userId)",
-                "email": "user\(userId)@example.com"
-            }
-            """
+    /*
+     * POST: Create a new user.
+     */
+    router.register(
+        method: "POST",
+        path: "/users",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { req in return Post(request: req) }
 
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
+    /*
+     * PUT: Update user by ID.
+     */
+    router.register(
+        method: "PUT",
+        path: "/users/:id",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { req in return Put(request: req) }
+
+    /*
+     * PATCH: Partially update user by ID.
+     */
+    router.register(
+        method: "PATCH",
+        path: "/users/:id",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { req in return Patch(request: req) }
+
+    /*
+     * DELETE: Delete user by ID.
+     */
+    router.register(
+        method: "DELETE",
+        path: "/users/:id",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { req in return Delete(request: req) }
+
+    /*
+     * HEAD: Get user metadata without body.
+     */
+    router.register(
+        method: "HEAD",
+        path: "/users/:id"
+    ) { req in return Head(request: req) }
+
+    /*
+     * OPTIONS: Return allowed methods for a resource.
+     */
+    router.register(method: "OPTIONS", path: "/users/:id") { req in return Options(request: req) }
 
     /*
      * Dynamic route: Get specific comment on a post.
@@ -231,57 +208,25 @@ func InitRouter() -> Router {
         method: "GET",
         path: "/posts/:postId/comments/:commentId",
         middleware: Array<Middleware>(arrayLiteral: apiLogger)
-    ) { request in
-        guard let postId = request.pathParameters["postId"],
-            let commentId = request.pathParameters["commentId"]
-        else {
-            return HTTPResponse.json(
-                statusCode: 400,
-                reason: "Bad Request",
-                body: "{\"error\": \"Missing parameters\"}"
-            )
-        }
-
-        let jsonBody = """
-            {
-                "postId": "\(postId)",
-                "commentId": "\(commentId)",
-                "author": "Anonymous",
-                "text": "This is comment \(commentId) on post \(postId)"
-            }
-            """
-
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
+    ) { req in return GetComments(request: req) }
 
     /*
-     * Static route that might conflict with dynamic route.
-     * This will take precedence over /users/:id when path is exactly "/users/me"
+     * POST: Create a comment on a post.
+     */
+    router.register(
+        method: "POST",
+        path: "/posts/:postId/comments",
+        middleware: Array<Middleware>(arrayLiteral: apiLogger)
+    ) { req in PostComments(request: req) }
+
+    /*
+     * Static route that takes precedence over dynamic route.
      */
     router.register(
         method: "GET",
         path: "/users/me",
         middleware: Array<Middleware>(arrayLiteral: apiLogger)
-    ) { request in
-        let jsonBody = """
-            {
-                "id": "current",
-                "name": "Current User",
-                "email": "me@example.com",
-                "note": "This is the static /users/me route"
-            }
-            """
-
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
+    ) { req in return Static(request: req) }
 
     /*
      * Dynamic route: Product categories and products.
@@ -289,39 +234,7 @@ func InitRouter() -> Router {
     router.register(
         method: "GET",
         path: "/products/:category/:productId"
-    ) { request in
-        guard let category = request.pathParameters["category"],
-            let productId = request.pathParameters["productId"]
-        else {
-            return HTTPResponse.json(
-                statusCode: 400,
-                reason: "Bad Request",
-                body: "{\"error\": \"Missing parameters\"}"
-            )
-        }
-
-        let jsonBody = """
-            {
-                "category": "\(category)",
-                "productId": "\(productId)",
-                "name": "Product \(productId)",
-                "price": 99.99
-            }
-            """
-
-        return HTTPResponse.json(
-            statusCode: 200,
-            reason: "OK",
-            body: jsonBody
-        )
-    }
-
-    /*
-     * This will cause a fatal error if uncommented because it's a duplicate:
-     * router.register(method: "GET", path: "/users/:id") { _ in
-     *     HTTPResponse.text(body: "Duplicate!")
-     * }
-     */
+    ) { req in Product(request: req) }
 
     return router
 }
