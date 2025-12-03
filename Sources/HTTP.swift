@@ -127,6 +127,66 @@ public struct HTTPResponse {
     }
 
     /*
+     * Build an XML response.
+     */
+    public static func xml(
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
+    ) -> HTTPResponse {
+        let bytes = Array(body.utf8)
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "application/xml; charset=utf-8"
+        return HTTPResponse(
+            statusCode: statusCode,
+            reasonPhrase: reason,
+            headers: responseHeaders,
+            body: bytes
+        )
+    }
+
+    /*
+     * Build an JS response.
+     */
+    public static func js(
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
+    ) -> HTTPResponse {
+        let bytes = Array(body.utf8)
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "application/javascript; charset=utf-8"
+        return HTTPResponse(
+            statusCode: statusCode,
+            reasonPhrase: reason,
+            headers: responseHeaders,
+            body: bytes
+        )
+    }
+
+    /*
+     * Build an CSS response.
+     */
+    public static func css(
+        statusCode: Int = 200,
+        reason: String = "OK",
+        body: String,
+        headers: HTTPHeaders = HTTPHeaders()
+    ) -> HTTPResponse {
+        let bytes = Array(body.utf8)
+        var responseHeaders = headers
+        responseHeaders["Content-Type"] = "text/css; charset=utf-8"
+        return HTTPResponse(
+            statusCode: statusCode,
+            reasonPhrase: reason,
+            headers: responseHeaders,
+            body: bytes
+        )
+    }
+
+    /*
      * Build a JSON response.
      */
     public static func json(

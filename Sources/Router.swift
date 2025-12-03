@@ -121,6 +121,8 @@ func InitRouter() -> Router {
      */
     router.register(method: "GET", path: "/") { req in return Home(request: req) }
 
+    router.register(method: "GET", path: "/processor") { req in return HTMLExample(request: req) }
+
     router.register(method: "GET", path: "/hello") { req in return Hello(request: req) }
 
     router.register(method: "GET", path: "/coding") { req in return Coding(request: req) }
