@@ -17,7 +17,7 @@ public typealias PathParameters = Dictionary<String, String>
 /*
  * Basic HTTP request representation.
  */
-public struct HTTPRequest {
+public final class HTTPRequest {
     public let method: String
     public let path: String
     public let version: String
@@ -45,7 +45,7 @@ public struct HTTPRequest {
 /*
  * Basic HTTP response representation.
  */
-public struct HTTPResponse {
+public final class HTTPResponse {
     public let statusCode: Int
     public let reasonPhrase: String
     public var headers: HTTPHeaders
@@ -524,7 +524,7 @@ public final class Router {
         /*
          * Create request with path parameters.
          */
-        var requestWithParams = request
+        let requestWithParams = request
         requestWithParams.pathParameters = pathParams
 
         /*

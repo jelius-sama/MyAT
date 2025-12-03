@@ -1,17 +1,25 @@
-// let exePath = CommandLine.arguments[0]
-// let exeURL = URL(fileURLWithPath: exePath).standardizedFileURL
-// let exeDir = exeURL.deletingLastPathComponent()
-// let parentDir = exeDir.deletingLastPathComponent()
-// let assetsDir = parentDir.appendingPathComponent("Assets").path
-// let assetManager = AssetManager(root: assetsDir)
+let router = Router()
 
-// if !FileManager.default.fileExists(atPath: assetsDir) {
-//     print("⚠️ Warning: Assets directory not found at \(assetsDir)")
-// }
+// Global middleware: Analytics and logging for all requests.
+router.use { request in
+    print("[\(request.method)] \(request.path)")
+    return Optional<HTTPResponse>.none
+}
+
+// Custom 404 handler with builder pattern.
+let notFoundBuilder = router.setNotFoundHandler()
+    .forAssets(prefix: "/static/") { req in return AssetNotfound(request: req) }
+    .forAPI(prefix: "/api/") { req in return APINotfound(request: req) }
+    .default { req in return DefaultNotfound(request: req) }
+
+router.finalize404Handler(builder: notFoundBuilder)
+
+// Initialize routes
+InitRouting(router: router)
 
 let server = HTTPServer(
     port: 6969,
-    router: InitRouter(),
+    router: router,
     assetManager: Optional<AssetManager>.some(
         AssetManager(useEmbedded: true))
 )
