@@ -9,13 +9,11 @@ pre-build:
 
 dev:
 	@make pre-build
-	@echo "Building for debug mode..."
 	@swift build --swift-sdk x86_64-swift-linux-musl
 	@echo "Successfully built \`./.build/debug/MyAT\` for debug."
 
 release:
 	@make pre-build
-	@echo "Building for release mode..."
 	@mkdir -p ./bin
 	@swift build --swift-sdk x86_64-swift-linux-musl -c release \
 		-Xswiftc -O \
