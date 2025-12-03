@@ -1,0 +1,4 @@
+module CEmbed {
+    header "libembed.h"
+    link "embed"
+}

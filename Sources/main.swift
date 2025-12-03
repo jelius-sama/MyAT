@@ -13,7 +13,7 @@ let server = HTTPServer(
     port: 6969,
     router: InitRouter(),
     assetManager: Optional<AssetManager>.some(
-        AssetManager(root: "/home/jelius-sama/Development/MyAT/Assets"))
+        AssetManager(useEmbedded: true))
 )
 
 server.start()
