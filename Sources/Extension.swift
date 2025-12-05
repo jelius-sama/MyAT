@@ -33,6 +33,15 @@ private extension String {
     }
 }
 
+extension String {
+    var jsSafe: String {
+        return
+            self
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: ";\n") + ";\n"
+    }
+}
+
 /*
  * Very small CharacterSet stand-in for whitespace trimming.
  */
