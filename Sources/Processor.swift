@@ -947,18 +947,6 @@ struct JSProcessor {
      */
     static func process(@JSBuilder _ content: () -> Array<JSNode>) -> String {
         let nodes = content()
-        return nodes.map { $0.toJS() }.joined(separator: "\n")
+        return nodes.map { $0.toJS() }.joined(separator: "\n").jsSafe
     }
 }
-
-// MARK: - Example Usage
-
-/*
- * Comprehensive example demonstrating all features:
- * - DOM manipulation
- * - Event handlers
- * - Control flow (if/else, for, while, switch)
- * - Try/catch error handling
- * - Fetch API with async/await
- * - Styling and class manipulation
- */

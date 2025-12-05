@@ -7,8 +7,9 @@ pre-build:
 	@mv ./lib/libembed.h ./Sources/CEmbed/libembed.h
 	@echo "Pre-built done!\n"
 
+	# @make pre-build
+
 dev:
-	@make pre-build
 	@swift build --swift-sdk x86_64-swift-linux-musl
 	@echo "Successfully built \`./.build/debug/MyAT\` for debug."
 	./.build/debug/MyAT

@@ -35,10 +35,14 @@ private extension String {
 
 extension String {
     var jsSafe: String {
+        // Trims whitespace and newlines, then replaces multiple semicolons with a single one.
         return
             self
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: ";\n") + ";\n"
+            .replacingOccurrences(of: "\n", with: ";\n")  // Keeps line breaks and adds semicolons
+            .replacingOccurrences(of: ";{2,}", with: ";", options: .regularExpression)  // Removes extra semicolons
+            .replacingOccurrences(of: ";\\s*\\n", with: "\n", options: .regularExpression)  // Removes semicolon followed by newline
+            + "\n"  // Ensure the string ends with a newline
     }
 }
 
