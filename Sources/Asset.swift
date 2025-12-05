@@ -5,7 +5,7 @@
 #endif
 
 import Foundation
-import CEmbed
+import Utils
 
 /*
  * Represents a loaded asset (file contents + MIME type).

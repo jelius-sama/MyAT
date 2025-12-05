@@ -1,0 +1,4 @@
+module Utils {
+    header "libutils.h"
+    link "utils"
+}

@@ -3,8 +3,8 @@
 pre-build:
 	@echo "Getting ready for build..."
 	@mkdir -p ./lib
-	@musl-go build -buildmode=c-archive -o ./lib/libembed.a ./embed.go
-	@mv ./lib/libembed.h ./Sources/CEmbed/libembed.h
+	@musl-go build -buildmode=c-archive -o ./lib/libutils.a ./utils.go
+	@mv ./lib/libutils.h ./Sources/Utils/libutils.h
 	@echo "Pre-built done!\n"
 
 dev:

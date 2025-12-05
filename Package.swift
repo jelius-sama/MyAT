@@ -10,15 +10,15 @@ let package = Package(
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
             name: "MyAT",
-            dependencies: ["CEmbed"],
+            dependencies: ["Utils"],
             path: "Sources",
             linkerSettings: [
-                .linkedLibrary("embed"),
+                .linkedLibrary("utils"),
                 .unsafeFlags(["-Llib"]),
             ]
         ),
         .target(
-            name: "CEmbed",
+            name: "Utils",
             publicHeadersPath: "."
         ),
     ]

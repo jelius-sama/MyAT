@@ -37,13 +37,13 @@ Project
 
 ### Binary Embedding System
 
-The `embed.go` and `libembed.a` pairing handles bundling static assets into the final executable.
+The `utils.go` and `libutils.a` pairing handles bundling static assets into the final executable.
 The steps during build:
 
-1. `embed.go` reads raw data under `Assets/`.
+1. `utils.go` reads raw data under `Assets/`.
 2. The embed tool converts them into raw blobs.
-3. `libembed.a` exposes a C interface (`libembed.h`) to access that data.
-4. Swift code calls into that C API through `CEmbed/module.modulemap`.
+3. `libutils.a` exposes a C interface (`libutils.h`) to access that data.
+4. Swift code calls into that C API through `Utils/module.modulemap`.
 
 This flow ensures all static files (JSON, HTML, MP4, text files) are packaged inside the executable with no filesystem lookups at runtime.
 
