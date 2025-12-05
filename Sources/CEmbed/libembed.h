@@ -79,6 +79,7 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
+extern char* GuessMimeType(char* path);
 
 // GetEmbeddedAsset retrieves an asset by its relative path
 // Path should NOT include "Assets/" prefix, e.g., "test.txt" not "Assets/test.txt"

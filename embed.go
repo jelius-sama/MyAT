@@ -9,6 +9,8 @@ import (
     "embed"
     "io/fs"
     "mime"
+    "net/http"
+    "os"
     "path/filepath"
     "strings"
     "unsafe"
@@ -27,17 +29,38 @@ type Asset struct {
 
 // guessMimeType determines MIME type from file extension
 func guessMimeType(path string) string {
+    mimesniffDetection := func() string {
+        file, err := os.Open(path)
+        if err != nil {
+            return "application/octet-stream"
+        }
+        defer file.Close()
+
+        // Read a portion of the file to determine the MIME type.
+        buf := make([]byte, 512)
+        _, err = file.Read(buf)
+        if err != nil {
+            return "application/octet-stream"
+        }
+
+        // Use http.DetectContentType to guess the MIME type.
+        mimeType := http.DetectContentType(buf)
+        return mimeType
+    }
+
     ext := filepath.Ext(path)
-    if ext == "" {
-        return "application/octet-stream"
+    if ext != "" {
+        if mimeType := mime.TypeByExtension(ext); mimeType != "" {
+            return mimeType
+        }
     }
 
-    mimeType := mime.TypeByExtension(ext)
-    if mimeType == "" {
-        return "application/octet-stream"
-    }
+    return mimesniffDetection()
+}
 
-    return mimeType
+//export GuessMimeType
+func GuessMimeType(path *C.char) *C.char {
+    return C.CString(guessMimeType(C.GoString(path)))
 }
 
 // GetEmbeddedAsset retrieves an asset by its relative path

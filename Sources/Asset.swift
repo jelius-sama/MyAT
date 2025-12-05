@@ -138,7 +138,9 @@ public final class AssetManager {
         }
 
         let fd = open(cPath, O_RDONLY)
-        free(cPath)
+        defer {
+            free(cPath)
+        }
 
         if fd < 0 {
             return Optional<Asset>.none
@@ -167,7 +169,11 @@ public final class AssetManager {
             data.removeSubrange(bytesRead..<fileSize)
         }
 
-        let mime = guessMimeType(path: fullPath)
+        var mime = "application/octet-stream"
+        if let cMime = GuessMimeType(cPath) {
+            mime = String(cString: cMime)
+            FreeString(cMime)
+        }
 
         let asset = Asset(
             path: fullPath,
@@ -176,63 +182,5 @@ public final class AssetManager {
         )
 
         return Optional<Asset>.some(asset)
-    }
-
-    private let mimeCache: Dictionary<String, String> = {
-        var map = Dictionary<String, String>()
-
-        // Try to read the standard mime.types file
-        let mimePaths = [
-            "/etc/mime.types",
-            "/usr/share/mime/types/mime.types",
-        ]
-
-        var text: Optional<String> = nil
-        for path in mimePaths {
-            if let t = try? String(contentsOfFile: path, encoding: .utf8) {
-                text = t
-                break
-            }
-        }
-
-        guard let text = text else {
-            return map
-        }
-
-        for rawLine in text.split(whereSeparator: \.isNewline) {
-            // Trim leading/trailing spaces
-            let line = String(rawLine).trimmingCharacters(in: CharacterSet.whitespaces)
-
-            // Skip empty lines and comments
-            if line.isEmpty { continue }
-            if line.hasPrefix("#") { continue }
-
-            // Split on spaces/tabs
-            let parts = line.split { part in part == " " || part == "\t" }
-            guard parts.count > 1 else { continue }
-
-            let mime = String(parts[0])
-            for extSub in parts.dropFirst() {
-                let ext = String(extSub).lowercased()
-                map[ext] = mime
-            }
-        }
-
-        return map
-    }()
-
-    private func guessMimeType(path: String) -> String {
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-
-        switch ext {
-        case let e where !e.isEmpty:
-            if let mime = mimeCache[e] {
-                return mime
-            }
-            return "application/octet-stream"
-
-        default:
-            return "application/octet-stream"
-        }
     }
 }
