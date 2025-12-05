@@ -23,6 +23,7 @@ public struct Asset {
 public final class AssetManager {
     private let root: Optional<String>
     private let useEmbedded: Bool
+    private let pathPrefix: String
 
     /*
      * Initialize AssetManager with at least one source (embedded or filesystem).
@@ -30,10 +31,13 @@ public final class AssetManager {
      * Parameters:
      *   - root: Optional filesystem root directory for assets
      *   - useEmbedded: Whether to use embedded assets (default: false)
+     *   - pathPrefix: Optional prefix for asset paths (default: "/static/")
      *
      * At least one of root or useEmbedded must be provided.
      */
-    public init(root: Optional<String> = nil, useEmbedded: Bool = false) {
+    public init(
+        root: Optional<String> = nil, useEmbedded: Bool = false, pathPrefix: String = "/static/"
+    ) {
         guard root != nil || useEmbedded else {
             fatalError(
                 "AssetManager requires at least one asset source: provide either 'root' or set 'useEmbedded' to true"
@@ -42,6 +46,16 @@ public final class AssetManager {
 
         self.root = root
         self.useEmbedded = useEmbedded
+        self.pathPrefix = pathPrefix
+    }
+
+    /*
+     * Retrieve the current asset path prefix.
+     * - Returns: A `String` representing the asset path prefix,
+     *            defaulting to `"/static/"`.
+     */
+    public func getPathPrefix() -> String {
+        return pathPrefix
     }
 
     /*

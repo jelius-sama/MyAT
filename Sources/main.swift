@@ -1,4 +1,4 @@
-let router = Router()
+let router = Router(assetPathPrefix: "/assets/")
 
 // Global middleware: Analytics and logging for all requests.
 router.use { request in
@@ -8,7 +8,7 @@ router.use { request in
 
 // Custom 404 handler with builder pattern.
 let notFoundBuilder = router.setNotFoundHandler()
-    .forAssets(prefix: "/static/") { req in return AssetNotfound(request: req) }
+    .forAssets() { req in return AssetNotfound(request: req) }
     .forAPI(prefix: "/api/") { req in return APINotfound(request: req) }
     .default { req in return DefaultNotfound(request: req) }
 
@@ -21,7 +21,7 @@ let server = HTTPServer(
     port: 6969,
     router: router,
     assetManager: Optional<AssetManager>.some(
-        AssetManager(useEmbedded: true))
+        AssetManager(useEmbedded: true, pathPrefix: "/assets/"))
 )
 
 server.start()

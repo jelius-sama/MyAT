@@ -269,20 +269,24 @@ internal struct RouteEntry {
  * Not found handler configuration with builder pattern.
  */
 public final class NotFoundHandlerBuilder {
-    private var assetHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+    private var assetHandlers: Array<(String, Optional<HTTPHandler>)> = Array<
+        (String, Optional<HTTPHandler>)
+    >()
     private var apiHandlers: Array<(String, HTTPHandler)> = Array<(String, HTTPHandler)>()
     private var defaultHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+    private var assetPathPrefix: String
 
-    internal init() {}
+    internal init(assetPathPrefix: String) {
+        self.assetPathPrefix = assetPathPrefix
+    }
 
     /*
      * Set handler for asset 404 errors (e.g., /static/).
      */
     public func forAssets(
-        prefix: String,
         handler: @escaping HTTPHandler
     ) -> NotFoundHandlerBuilder {
-        assetHandler = Optional<HTTPHandler>.some(handler)
+        assetHandlers.append((assetPathPrefix, handler))
         return self
     }
 
@@ -313,10 +317,12 @@ public final class NotFoundHandlerBuilder {
             /*
              * Check asset handler first.
              */
-            if let assetH = self.assetHandler,
-                request.path.hasPrefix("/static/")
-            {
-                return assetH(request)
+            for (prefix, handler) in self.assetHandlers {
+                if request.path.hasPrefix(prefix) {
+                    if let handler = handler {
+                        return handler(request)
+                    }
+                }
             }
 
             /*
@@ -368,8 +374,11 @@ public final class Router {
     private var globalMiddleware: Array<Middleware> = Array<Middleware>()
 
     private var notFoundHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+    private var assetPathPrefix: String
 
-    public init() {}
+    public init(assetPathPrefix: String) {
+        self.assetPathPrefix = assetPathPrefix
+    }
 
     /*
      * Register global middleware that runs for all routes.
@@ -382,7 +391,7 @@ public final class Router {
      * Set a custom 404 handler with builder pattern.
      */
     public func setNotFoundHandler() -> NotFoundHandlerBuilder {
-        let builder = NotFoundHandlerBuilder()
+        let builder = NotFoundHandlerBuilder(assetPathPrefix: assetPathPrefix)
         return builder
     }
 
@@ -882,11 +891,11 @@ public final class HTTPServer {
 
         if let assets = assetManager,
             request.method == "GET",
-            request.path.hasPrefix("/static/")
+            request.path.hasPrefix(assets.getPathPrefix())
         {
             let index = request.path.index(
                 request.path.startIndex,
-                offsetBy: "/static/".count
+                offsetBy: assets.getPathPrefix().count
             )
             let rel = "/" + String(request.path[index...])
             if let asset = assets.loadAsset(relativePath: rel) {
