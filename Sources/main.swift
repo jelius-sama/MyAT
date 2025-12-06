@@ -1,4 +1,4 @@
-let router = Router(assetPathPrefix: "/assets/")
+let router = Router()
 
 // Global middleware: Analytics and logging for all requests.
 router.use { request in

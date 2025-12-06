@@ -274,9 +274,11 @@ public final class NotFoundHandlerBuilder {
     >()
     private var apiHandlers: Array<(String, HTTPHandler)> = Array<(String, HTTPHandler)>()
     private var defaultHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
-    private var assetPathPrefix: String
+    private var assetPathPrefix: String = String()
 
-    internal init(assetPathPrefix: String) {
+    internal init() {}
+
+    public func setAssetPathPrefix(_ assetPathPrefix: String) {
         self.assetPathPrefix = assetPathPrefix
     }
 
@@ -374,9 +376,11 @@ public final class Router {
     private var globalMiddleware: Array<Middleware> = Array<Middleware>()
 
     private var notFoundHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
-    private var assetPathPrefix: String
+    private var assetPathPrefix: String = String()
 
-    public init(assetPathPrefix: String) {
+    public init() {}
+
+    public func setAssetPathPrefix(_ assetPathPrefix: String) {
         self.assetPathPrefix = assetPathPrefix
     }
 
@@ -391,7 +395,8 @@ public final class Router {
      * Set a custom 404 handler with builder pattern.
      */
     public func setNotFoundHandler() -> NotFoundHandlerBuilder {
-        let builder = NotFoundHandlerBuilder(assetPathPrefix: assetPathPrefix)
+        let builder = NotFoundHandlerBuilder()
+        builder.setAssetPathPrefix(assetPathPrefix)
         return builder
     }
 
@@ -654,6 +659,7 @@ public final class HTTPServer {
         self.port = port
         self.router = router
         self.assetManager = assetManager
+        self.router.setAssetPathPrefix(assetManager?.getPathPrefix() ?? "/static/")
         self.parser = HTTPParser()
     }
 
