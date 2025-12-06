@@ -21,7 +21,7 @@ let server = HTTPServer(
     port: 6969,
     router: router,
     assetManager: Optional<AssetManager>.some(
-        AssetManager(useEmbedded: true, pathPrefix: "/assets/"))
+        AssetManager(useEmbedded: true, pathPrefix: "/resource/"))
 )
 
 server.start()
