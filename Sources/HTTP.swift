@@ -51,9 +51,6 @@ public final class HTTPResponse {
     public var headers: HTTPHeaders
     public var body: Array<UInt8>
 
-    /*
-     * Main initializer with all parameters.
-     */
     public init(
         statusCode: Int,
         reasonPhrase: String,
@@ -66,9 +63,6 @@ public final class HTTPResponse {
         self.body = body
     }
 
-    /*
-     * Serialize response to HTTP/1.1 wire format.
-     */
     public func serialize() -> Array<UInt8> {
         var buffer = Array<UInt8>()
         let statusLine = "HTTP/1.1 \(statusCode) \(reasonPhrase)\r\n"
@@ -86,9 +80,6 @@ public final class HTTPResponse {
         return buffer
     }
 
-    /*
-     * Build a plain text response quickly.
-     */
     public static func text(
         statusCode: Int = 200,
         reason: String = "OK",
@@ -106,9 +97,6 @@ public final class HTTPResponse {
         )
     }
 
-    /*
-     * Build an HTML response.
-     */
     public static func html(
         statusCode: Int = 200,
         reason: String = "OK",
@@ -126,69 +114,6 @@ public final class HTTPResponse {
         )
     }
 
-    /*
-     * Build an XML response.
-     */
-    public static func xml(
-        statusCode: Int = 200,
-        reason: String = "OK",
-        body: String,
-        headers: HTTPHeaders = HTTPHeaders()
-    ) -> HTTPResponse {
-        let bytes = Array(body.utf8)
-        var responseHeaders = headers
-        responseHeaders["Content-Type"] = "application/xml; charset=utf-8"
-        return HTTPResponse(
-            statusCode: statusCode,
-            reasonPhrase: reason,
-            headers: responseHeaders,
-            body: bytes
-        )
-    }
-
-    /*
-     * Build an JS response.
-     */
-    public static func js(
-        statusCode: Int = 200,
-        reason: String = "OK",
-        body: String,
-        headers: HTTPHeaders = HTTPHeaders()
-    ) -> HTTPResponse {
-        let bytes = Array(body.utf8)
-        var responseHeaders = headers
-        responseHeaders["Content-Type"] = "application/javascript; charset=utf-8"
-        return HTTPResponse(
-            statusCode: statusCode,
-            reasonPhrase: reason,
-            headers: responseHeaders,
-            body: bytes
-        )
-    }
-
-    /*
-     * Build an CSS response.
-     */
-    public static func css(
-        statusCode: Int = 200,
-        reason: String = "OK",
-        body: String,
-        headers: HTTPHeaders = HTTPHeaders()
-    ) -> HTTPResponse {
-        let bytes = Array(body.utf8)
-        var responseHeaders = headers
-        responseHeaders["Content-Type"] = "text/css; charset=utf-8"
-        return HTTPResponse(
-            statusCode: statusCode,
-            reasonPhrase: reason,
-            headers: responseHeaders,
-            body: bytes
-        )
-    }
-
-    /*
-     * Build a JSON response.
-     */
     public static func json(
         statusCode: Int = 200,
         reason: String = "OK",
@@ -206,9 +131,6 @@ public final class HTTPResponse {
         )
     }
 
-    /*
-     * Build a response from an asset.
-     */
     public static func fromAsset(
         asset: Asset,
         statusCode: Int = 200,
@@ -233,9 +155,6 @@ public typealias HTTPHandler = (HTTPRequest) -> HTTPResponse
 
 /*
  * Middleware type that can intercept and modify requests/responses.
- * Returns Optional<HTTPResponse>:
- * - .some(response): Short-circuit with this response
- * - .none: Continue to next middleware/handler
  */
 public typealias Middleware = (HTTPRequest) -> Optional<HTTPResponse>
 
@@ -266,29 +185,33 @@ internal struct RouteEntry {
 }
 
 /*
+ * Request context that identifies what type of request this is.
+ */
+public enum RequestContext {
+    case asset
+    case api
+    case regular
+}
+
+/*
  * Not found handler configuration with builder pattern.
+ * This builder now receives context about what type of request it is.
  */
 public final class NotFoundHandlerBuilder {
-    private var assetHandlers: Array<(String, Optional<HTTPHandler>)> = Array<
-        (String, Optional<HTTPHandler>)
-    >()
-    private var apiHandlers: Array<(String, HTTPHandler)> = Array<(String, HTTPHandler)>()
+    private var assetHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
+    private var apiPrefixes: Array<String> = Array<String>()
+    private var apiHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
     private var defaultHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
-    private var assetPathPrefix: String = String()
 
     internal init() {}
 
-    public func setAssetPathPrefix(_ assetPathPrefix: String) {
-        self.assetPathPrefix = assetPathPrefix
-    }
-
     /*
-     * Set handler for asset 404 errors (e.g., /static/).
+     * Set handler for asset 404 errors.
      */
     public func forAssets(
         handler: @escaping HTTPHandler
     ) -> NotFoundHandlerBuilder {
-        assetHandlers.append((assetPathPrefix, handler))
+        assetHandler = Optional<HTTPHandler>.some(handler)
         return self
     }
 
@@ -299,7 +222,8 @@ public final class NotFoundHandlerBuilder {
         prefix: String,
         handler: @escaping HTTPHandler
     ) -> NotFoundHandlerBuilder {
-        apiHandlers.append((prefix, handler))
+        apiPrefixes.append(prefix)
+        apiHandler = Optional<HTTPHandler>.some(handler)
         return self
     }
 
@@ -313,26 +237,31 @@ public final class NotFoundHandlerBuilder {
 
     /*
      * Build the final handler that checks all conditions.
+     * Now takes a context parameter to know what type of request it is.
      */
-    internal func build() -> HTTPHandler {
-        return { request in
-            /*
-             * Check asset handler first.
-             */
-            for (prefix, handler) in self.assetHandlers {
-                if request.path.hasPrefix(prefix) {
-                    if let handler = handler {
-                        return handler(request)
-                    }
+    internal func build() -> (HTTPRequest, RequestContext) -> HTTPResponse {
+        return { request, context in
+            switch context {
+            case .asset:
+                if let handler = self.assetHandler {
+                    return handler(request)
                 }
+            case .api:
+                if let handler = self.apiHandler {
+                    return handler(request)
+                }
+            case .regular:
+                break
             }
 
             /*
-             * Check API handlers.
+             * Check if it's an API request based on prefix.
              */
-            for (prefix, handler) in self.apiHandlers {
+            for prefix in self.apiPrefixes {
                 if request.path.hasPrefix(prefix) {
-                    return handler(request)
+                    if let handler = self.apiHandler {
+                        return handler(request)
+                    }
                 }
             }
 
@@ -353,19 +282,6 @@ public final class NotFoundHandlerBuilder {
 }
 
 /*
- * Context passed into a client handler thread.
- */
-final class ClientContext {
-    let server: HTTPServer
-    let clientFD: Int32
-
-    init(server: HTTPServer, clientFD: Int32) {
-        self.server = server
-        self.clientFD = clientFD
-    }
-}
-
-/*
  * Router with support for static and dynamic routes, middleware,
  * and custom 404 handlers.
  */
@@ -375,14 +291,10 @@ public final class Router {
 
     private var globalMiddleware: Array<Middleware> = Array<Middleware>()
 
-    private var notFoundHandler: Optional<HTTPHandler> = Optional<HTTPHandler>.none
-    private var assetPathPrefix: String = String()
+    private var notFoundHandler: Optional<(HTTPRequest, RequestContext) -> HTTPResponse> =
+        Optional<(HTTPRequest, RequestContext) -> HTTPResponse>.none
 
     public init() {}
-
-    public func setAssetPathPrefix(_ assetPathPrefix: String) {
-        self.assetPathPrefix = assetPathPrefix
-    }
 
     /*
      * Register global middleware that runs for all routes.
@@ -395,25 +307,20 @@ public final class Router {
      * Set a custom 404 handler with builder pattern.
      */
     public func setNotFoundHandler() -> NotFoundHandlerBuilder {
-        let builder = NotFoundHandlerBuilder()
-        builder.setAssetPathPrefix(assetPathPrefix)
-        return builder
+        return NotFoundHandlerBuilder()
     }
 
     /*
      * Finalize the 404 handler from builder.
      */
     public func finalize404Handler(builder: NotFoundHandlerBuilder) {
-        notFoundHandler = Optional<HTTPHandler>.some(builder.build())
+        notFoundHandler = Optional<(HTTPRequest, RequestContext) -> HTTPResponse>.some(
+            builder.build()
+        )
     }
 
     /*
      * Register a handler for a given method and path with optional middleware.
-     * Supports dynamic routes with :parameter syntax.
-     * Examples:
-     *   - Static: "/users"
-     *   - Dynamic: "/users/:id"
-     *   - Dynamic: "/posts/:postId/comments/:commentId"
      */
     public func register(
         method: String,
@@ -429,14 +336,8 @@ public final class Router {
             originalPath: path
         )
 
-        /*
-         * Get existing routes for this method.
-         */
         var methodRoutes = routes[method] ?? Array<RouteEntry>()
 
-        /*
-         * Check for exact duplicates (same method + same path).
-         */
         for existing in methodRoutes {
             if existing.originalPath == path {
                 fatalError(
@@ -446,9 +347,6 @@ public final class Router {
             }
         }
 
-        /*
-         * Check for static vs dynamic conflicts.
-         */
         if case .staticRoute(let staticPath) = pattern {
             for existing in methodRoutes {
                 if case .dynamicRoute = existing.pattern {
@@ -472,12 +370,12 @@ public final class Router {
 
     /*
      * Route a request through middleware chain and handler.
-     * Execution order:
-     * 1. Global middleware (can short-circuit)
-     * 2. Route-specific middleware (can short-circuit)
-     * 3. Handler
+     * Now accepts a context parameter to help with 404 handling.
      */
-    public func route(request: HTTPRequest) -> HTTPResponse {
+    public func route(
+        request: HTTPRequest,
+        context: RequestContext = .regular
+    ) -> HTTPResponse {
         /*
          * Execute global middleware first.
          */
@@ -491,7 +389,7 @@ public final class Router {
          * Find matching route entry.
          */
         guard let methodRoutes = routes[request.method] else {
-            return handleNotFound(request: request)
+            return handleNotFound(request: request, context: context)
         }
 
         /*
@@ -520,9 +418,6 @@ public final class Router {
             }
         }
 
-        /*
-         * Static routes take precedence over dynamic routes.
-         */
         let matchedEntry: RouteEntry
         var pathParams = PathParameters()
 
@@ -532,12 +427,9 @@ public final class Router {
             matchedEntry = dynamicEntry
             pathParams = params
         } else {
-            return handleNotFound(request: request)
+            return handleNotFound(request: request, context: context)
         }
 
-        /*
-         * Create request with path parameters.
-         */
         let requestWithParams = request
         requestWithParams.pathParameters = pathParams
 
@@ -550,18 +442,18 @@ public final class Router {
             }
         }
 
-        /*
-         * Execute the handler.
-         */
         return matchedEntry.handler(requestWithParams)
     }
 
     /*
      * Handle 404 with custom handler or default.
      */
-    internal func handleNotFound(request: HTTPRequest) -> HTTPResponse {
+    internal func handleNotFound(
+        request: HTTPRequest,
+        context: RequestContext
+    ) -> HTTPResponse {
         if let handler = notFoundHandler {
-            return handler(request)
+            return handler(request, context)
         }
 
         return HTTPResponse.text(
@@ -571,9 +463,6 @@ public final class Router {
         )
     }
 
-    /*
-     * Parse route path into pattern (static or dynamic).
-     */
     private func parseRoutePath(path: String) -> RoutePattern {
         let components = path.split(separator: "/")
         var segments = Array<RouteSegment>()
@@ -597,10 +486,6 @@ public final class Router {
         }
     }
 
-    /*
-     * Match a request path against a route pattern.
-     * Returns path parameters if matched, none otherwise.
-     */
     private func matchesPattern(
         path: String,
         pattern: RoutePattern
@@ -619,8 +504,8 @@ public final class Router {
             }
 
             var params = PathParameters()
-
             var index = 0
+
             while index < segments.count {
                 let segment = segments[index]
                 let component = String(pathComponents[index])
@@ -643,7 +528,21 @@ public final class Router {
 }
 
 /*
+ * Context passed into a client handler thread.
+ */
+final class ClientContext {
+    let server: HTTPServer
+    let clientFD: Int32
+
+    init(server: HTTPServer, clientFD: Int32) {
+        self.server = server
+        self.clientFD = clientFD
+    }
+}
+
+/*
  * HTTP server that owns the listening socket and dispatches to Router.
+ * Assets are handled BEFORE routing, so they never hit the router.
  */
 public final class HTTPServer {
     private let port: UInt16
@@ -659,14 +558,9 @@ public final class HTTPServer {
         self.port = port
         self.router = router
         self.assetManager = assetManager
-        self.router.setAssetPathPrefix(assetManager?.getPathPrefix() ?? "/static/")
         self.parser = HTTPParser()
     }
 
-    /*
-     * Start the server. This will block the calling thread and spawn a
-     * new thread for each incoming connection.
-     */
     public func start() {
         #if canImport(Glibc)
             let sockType = Int32(SOCK_STREAM.rawValue)
@@ -697,7 +591,7 @@ public final class HTTPServer {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = htons(port)
-        addr.sin_addr = in_addr(s_addr: in_addr_t(0)) /* INADDR_ANY */
+        addr.sin_addr = in_addr(s_addr: in_addr_t(0))
 
         let bindResult = withUnsafePointer(to: &addr) { ptr -> Int32 in
             let sockPtr = UnsafeRawPointer(ptr).assumingMemoryBound(
@@ -724,23 +618,15 @@ public final class HTTPServer {
 
         print("HTTPServer listening on port \(port)")
 
-        /*
-         * Accept loop: each client handled by a separate pthread.
-         */
         while true {
             var clientAddr = sockaddr()
             var clientLen = socklen_t(MemoryLayout<sockaddr>.size)
 
             let clientFD = withUnsafeMutablePointer(to: &clientAddr) {
-                ptr
-                    -> Int32 in
+                ptr -> Int32 in
                 let sockPtr = UnsafeMutableRawPointer(ptr)
                     .assumingMemoryBound(to: sockaddr.self)
-                return accept(
-                    listenFD,
-                    sockPtr,
-                    &clientLen
-                )
+                return accept(listenFD, sockPtr, &clientLen)
             }
 
             if clientFD < 0 {
@@ -749,8 +635,7 @@ public final class HTTPServer {
             }
 
             let context = ClientContext(server: self, clientFD: clientFD)
-            let unmanaged =
-                Unmanaged.passRetained(context)
+            let unmanaged = Unmanaged.passRetained(context)
             let rawPtr = unmanaged.toOpaque()
 
             #if canImport(Glibc)
@@ -776,10 +661,6 @@ public final class HTTPServer {
                 unmanaged.release()
                 close(clientFD)
             } else {
-                /*
-                 * We do not need to join on this thread; detach so that
-                 * resources are cleaned when it exits.
-                */
                 #if canImport(Glibc)
                     pthread_detach(thread)
                 #else
@@ -792,8 +673,8 @@ public final class HTTPServer {
     }
 
     /*
-     * Parse HTTP request from client, route it, and send response.
-     * Handles request body parsing based on Content-Length.
+     * Handle client request with improved asset handling.
+     * Assets are checked FIRST, before any routing occurs.
      */
     fileprivate func handleClient(fd: Int32) {
         var buffer = Array<UInt8>()
@@ -822,9 +703,6 @@ public final class HTTPServer {
                 let headerEndIndex = range.upperBound
                 headerBytes = Array(buffer[..<headerEndIndex])
 
-                /*
-                 * Keep any bytes after the header end for body parsing.
-                 */
                 if headerEndIndex < buffer.count {
                     let bodyStart = buffer[headerEndIndex...]
                     buffer = Array(bodyStart)
@@ -834,10 +712,7 @@ public final class HTTPServer {
             }
         }
 
-        guard
-            let requestString =
-                String(validating: headerBytes, as: UTF8.self)
-        else {
+        guard let requestString = String(validating: headerBytes, as: UTF8.self) else {
             close(fd)
             return
         }
@@ -854,9 +729,6 @@ public final class HTTPServer {
             var bodyBytes = buffer
             let remainingBytes = contentLength - bodyBytes.count
 
-            /*
-             * Read remaining body bytes if needed.
-             */
             if remainingBytes > 0 {
                 var remaining = remainingBytes
                 while remaining > 0 {
@@ -877,9 +749,6 @@ public final class HTTPServer {
                 }
             }
 
-            /*
-             * Update request with parsed body.
-             */
             request = HTTPRequest(
                 method: request.method,
                 path: request.path,
@@ -891,29 +760,51 @@ public final class HTTPServer {
         }
 
         /*
-         * Handle static file serving with custom 404.
+         * IMPROVED: Check assets FIRST, before routing.
+         * This ensures assets are handled independently of routes.
          */
         let response: HTTPResponse
 
         if let assets = assetManager,
-            request.method == "GET",
-            request.path.hasPrefix(assets.getPathPrefix())
+            request.method == "GET"
         {
-            let index = request.path.index(
-                request.path.startIndex,
-                offsetBy: assets.getPathPrefix().count
-            )
-            let rel = "/" + String(request.path[index...])
-            if let asset = assets.loadAsset(relativePath: rel) {
-                response = HTTPResponse.fromAsset(asset: asset)
+            let assetPrefix = assets.getPathPrefix()
+
+            if request.path.hasPrefix(assetPrefix) {
+                /*
+                 * This is an asset request - try to load it.
+                 */
+                let index = request.path.index(
+                    request.path.startIndex,
+                    offsetBy: assetPrefix.count
+                )
+                let rel = "/" + String(request.path[index...])
+
+                if let asset = assets.loadAsset(relativePath: rel) {
+                    /*
+                     * Asset found - serve it.
+                     */
+                    response = HTTPResponse.fromAsset(asset: asset)
+                } else {
+                    /*
+                     * Asset not found - use asset-specific 404 handler.
+                     */
+                    response = router.handleNotFound(
+                        request: request,
+                        context: .asset
+                    )
+                }
             } else {
                 /*
-                 * Use router's 404 handler for assets.
+                 * Not an asset request - route normally.
                  */
-                response = router.handleNotFound(request: request)
+                response = router.route(request: request, context: .regular)
             }
         } else {
-            response = router.route(request: request)
+            /*
+             * No asset manager or not a GET request - route normally.
+             */
+            response = router.route(request: request, context: .regular)
         }
 
         let bytes = response.serialize()
@@ -933,9 +824,7 @@ private func clientThreadEntry(arg: Optional<CPtr>) -> Optional<CPtr> {
     guard let arg = arg else {
         return nil
     }
-    let unmanaged = Unmanaged<ClientContext>.fromOpaque(
-        ConstCPtr(arg)
-    )
+    let unmanaged = Unmanaged<ClientContext>.fromOpaque(ConstCPtr(arg))
     let context = unmanaged.takeRetainedValue()
     context.server.handleClient(fd: context.clientFD)
     return nil
