@@ -24,4 +24,6 @@ let server = HTTPServer(
         AssetManager(useEmbedded: true, pathPrefix: "/resource/"))
 )
 
+// TODO: Websockets support, Latest HTTP version support, database support
+
 server.start()
